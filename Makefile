@@ -1,41 +1,44 @@
-.PHONY: all build run clean
+# Makefile for building, running, and cleaning the NIS2 Dashboard application.
 
-# Go application settings
-GO_APP_NAME = nis2-dash-backend
-GO_MAIN_DIR = ./backend
-GO_BUILD_DIR = ./build/backend
+.PHONY: all build build-go build-react run clean
 
-# React application settings
-REACT_APP_NAME = nis2-dash-frontend
-REACT_APP_DIR = ./frontend
-REACT_BUILD_DIR = ./build/frontend
+# --- Application Settings ---
+GO_APP_NAME := nis2-dash-backend
+GO_MAIN_DIR := ./backend/cmd/
+GO_BUILD_DIR := ./build/backend
 
-# Docker settings
-DOCKER_COMPOSE_FILE = docker-compose.yml
-DOCKER_IMAGE_PREFIX = nis2-dash
+REACT_APP_DIR := ./frontend
 
+# Default target runs the 'build' target.
 all: build
 
+# Builds both the Go and React applications locally.
 build: build-go build-react
 
+# Compiles the Go application into the build directory.
+# The path is corrected to point to the root of the backend module.
 build-go:
-	@echo "Building Go application..."
-	mkdir -p $(GO_BUILD_DIR)
+	@echo "--> Building Go application..."
+	@mkdir -p $(GO_BUILD_DIR)
 	go build -o $(GO_BUILD_DIR)/$(GO_APP_NAME) $(GO_MAIN_DIR)
 
+# Prepares the React application by installing dependencies.
+# The 'npm run build' step is not strictly necessary here, as the
+# Dockerfile will handle the production build. This is for local verification.
 build-react:
-	@echo "Building React application..."
-	cd $(REACT_APP_DIR) && npm install
-	cd $(REACT_APP_DIR) && npm run build
-	mkdir -p $(REACT_BUILD_DIR)
-	cp -r $(REACT_APP_DIR)/build/* $(REACT_BUILD_DIR)/
+	@echo "--> Building React application..."
+	cd $(REACT_APP_DIR) && npm install && npm run build
 
+# Runs the application stack using Docker Compose.
+# The '--build' flag ensures images are rebuilt if anything has changed.
 run:
-	@echo "Running applications with Docker Compose..."
+	@echo "--> Running applications with Docker Compose..."
 	docker-compose -f $(DOCKER_COMPOSE_FILE) up --build
 
+# Cleans up build artifacts and stops/removes Docker containers and images.
 clean:
-	@echo "Cleaning up build directories and Docker images..."
-	rm -rf $(GO_BUILD_DIR)
-	rm -rf $(REACT_BUILD_DIR)
-	docker-compose -f $(DOCKER_COMPOSE_FILE) down --rmi all
+	@echo "--> Cleaning up..."
+	@rm -rf $(GO_BUILD_DIR)
+	@rm -rf $(REACT_APP_DIR)/build
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) down --rmi all -v --remove-orphans
+
