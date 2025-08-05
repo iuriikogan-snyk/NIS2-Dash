@@ -24,9 +24,9 @@ import (
 
 // Config holds application configuration loaded from the environment.
 type Config struct {
-	SnykToken string
-	SnykOrgID string
-	Port      string
+	SnykToken   string
+	SnykGroupID string
+	Port        string
 }
 
 // App encapsulates application properties and dependencies.
@@ -64,19 +64,19 @@ func NewApp(cfg Config, logger *slog.Logger) *App {
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	cfg := Config{
-		SnykToken: os.Getenv("SNYK_TOKEN"),
-		SnykOrgID: os.Getenv("SNYK_ORG_ID"),
-		Port:      getEnv("PORT", "8080"), // Use helper to set default port
+		SnykToken:   os.Getenv("SNYK_TOKEN"),
+		SnykGroupID: os.Getenv("SNYK_GROUP_ID"),
+		Port:        getEnv("PORT", "8080"),
 	}
-	if cfg.SnykToken == "" || cfg.SnykOrgID == "" {
-		logger.Error("SNYK_TOKEN and SNYK_ORG_ID must be set")
+	if cfg.SnykToken == "" || cfg.SnykGroupID == "" {
+		logger.Error("SNYK_TOKEN and SNYK_GROUP_ID must be set")
 		os.Exit(1)
 	}
 
-	app := NewApp(cfg, logger) // Correctly initialize the App struct
+	app := NewApp(cfg, logger)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/data", app.dataHandler) // Use the initialized app variable
+	mux.HandleFunc("GET /api/data", app.dataHandler)
 
 	logger.Info("Backend server starting", "port", cfg.Port)
 	server := &http.Server{Addr: ":" + cfg.Port, Handler: mux}
@@ -117,9 +117,6 @@ func (a *App) dataHandler(w http.ResponseWriter, r *http.Request) {
 
 // initiateExport sends a request to Snyk to start a new data export job.
 func (a *App) initiateExport(ctx context.Context) (string, error) {
-	// The request body for an organization-level export only needs the columns.
-	// The 'orgs' filter is only valid for group-level exports. This was the
-	// likely cause of the EOF error.
 	type InitiateExportRequest struct {
 		Columns []string `json:"columns"`
 	}
@@ -132,7 +129,7 @@ func (a *App) initiateExport(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("failed to marshal request body: %w", err)
 	}
 
-	url := fmt.Sprintf("https://api.snyk.io/v1/org/%s/exports?version=2024-10-15", a.config.SnykOrgID)
+	url := fmt.Sprintf("https://api.snyk.io/rest/groups/%s/exports?version=2024-10-15", a.config.SnykGroupID)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(bodyBytes))
 	if err != nil {
 		return "", err
@@ -145,7 +142,6 @@ func (a *App) initiateExport(ctx context.Context) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	// Check for non-2xx status codes to get better error messages than EOF.
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
 		return "", fmt.Errorf("snyk API returned a non-successful status code: %d - %s", resp.StatusCode, string(body))
@@ -173,7 +169,8 @@ func (a *App) pollExportStatus(ctx context.Context, exportID string) (string, er
 		} `json:"results,omitempty"`
 	}
 
-	url := fmt.Sprintf("https://api.snyk.io/v1/org/%s/exports/%s?version=2024-10-15", a.config.SnykOrgID, exportID)
+	// Corrected URL to use the /rest/ base path.
+	url := fmt.Sprintf("https://api.snyk.io/rest/groups/%s/exports/%s?version=2024-10-15", a.config.SnykGroupID, exportID)
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	pollingCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
