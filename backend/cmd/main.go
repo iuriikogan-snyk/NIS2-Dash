@@ -22,28 +22,28 @@ import (
 // polling for completion, and processing the resulting CSV data into aggregated metrics.
 //
 
-// Config holds application configuration loaded from the environment.
+// Config holds environment-based settings.
 type Config struct {
 	SnykToken   string
 	SnykGroupID string
 	Port        string
 }
 
-// App encapsulates application properties and dependencies.
+// App holds app-wide dependencies.
 type App struct {
 	config     Config
 	logger     *slog.Logger
 	httpClient *http.Client
 }
 
-// ProjectInfo holds aggregated risk data for a single Snyk project.
+// ProjectInfo holds risk data per project.
 type ProjectInfo struct {
 	Name               string `json:"name"`
 	CriticalIssueCount int    `json:"criticalIssueCount"`
 	HighIssueCount     int    `json:"highIssueCount"`
 }
 
-// DashboardData is the structure of the JSON response sent to the frontend.
+// DashboardData is returned as JSON to the frontend.
 type DashboardData struct {
 	IssuesBySeverity      map[string]int `json:"issuesBySeverity"`
 	IssuesByEnvironment   map[string]int `json:"issuesByEnvironment"`
@@ -51,7 +51,7 @@ type DashboardData struct {
 	Top5RiskiestProjects  []ProjectInfo  `json:"top5RiskiestProjects"`
 }
 
-// NewApp creates a new App instance with its dependencies.
+// Creates and returns a new App instance.
 func NewApp(cfg Config, logger *slog.Logger) *App {
 	return &App{
 		config:     cfg,
@@ -60,9 +60,9 @@ func NewApp(cfg Config, logger *slog.Logger) *App {
 	}
 }
 
-// main is the application entry point.
+// Entry point of the application.
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{}))
 	cfg := Config{
 		SnykToken:   os.Getenv("SNYK_TOKEN"),
 		SnykGroupID: os.Getenv("SNYK_GROUP_ID"),
@@ -75,9 +75,11 @@ func main() {
 
 	app := NewApp(cfg, logger)
 
+	// Register route
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/data", app.dataHandler)
+	mux.HandleFunc("/api/data", app.dataHandler)
 
+	// Start HTTP server
 	logger.Info("Backend server starting", "port", cfg.Port)
 	server := &http.Server{Addr: ":" + cfg.Port, Handler: mux}
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -86,28 +88,33 @@ func main() {
 	}
 }
 
-// dataHandler orchestrates the Snyk export and data processing workflow.
+// Handles GET /api/data by exporting, polling, and processing Snyk data.
 func (a *App) dataHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	ctx := r.Context()
 	a.logger.Info("Starting Snyk analytics export for enhanced metrics...")
 
 	exportID, err := a.initiateExport(ctx)
 	if err != nil {
-		a.logger.Error("Failed to initiate export", "error", err)
+		a.logger.Error("Failed to initiate export", "error", err.Error())
 		http.Error(w, "Failed to initiate Snyk export", http.StatusInternalServerError)
 		return
 	}
 
 	fileURL, err := a.pollExportStatus(ctx, exportID)
 	if err != nil {
-		a.logger.Error("Failed to get finished export status", "error", err)
+		a.logger.Error("Failed to get finished export status", "error", err.Error())
 		http.Error(w, "Failed to complete Snyk export", http.StatusInternalServerError)
 		return
 	}
 
 	dashboardData, err := a.fetchAndProcessCSV(ctx, fileURL)
 	if err != nil {
-		a.logger.Error("Failed to process CSV data", "error", err)
+		a.logger.Error("Failed to process CSV data", "error", err.Error())
 		http.Error(w, "Failed to process exported Snyk data", http.StatusInternalServerError)
 		return
 	}
@@ -115,12 +122,11 @@ func (a *App) dataHandler(w http.ResponseWriter, r *http.Request) {
 	a.respondWithJSON(w, http.StatusOK, dashboardData)
 }
 
-// initiateExport sends a request to Snyk to start a new data export job.
+// Starts a new Snyk export job and returns the export ID.
 func (a *App) initiateExport(ctx context.Context) (string, error) {
-	type InitiateExportRequest struct {
+	reqBody := struct {
 		Columns []string `json:"columns"`
-	}
-	reqBody := InitiateExportRequest{
+	}{
 		Columns: []string{"issue_severity", "issue_type", "project_environments", "computed_fixability", "project_name"},
 	}
 
@@ -144,13 +150,12 @@ func (a *App) initiateExport(ctx context.Context) (string, error) {
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("snyk API returned a non-successful status code: %d - %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("Snyk API returned %d: %s", resp.StatusCode, string(body))
 	}
 
-	type InitiateExportResponse struct {
+	var exportResp struct {
 		ExportID string `json:"export_id"`
 	}
-	var exportResp InitiateExportResponse
 	if err := json.NewDecoder(resp.Body).Decode(&exportResp); err != nil {
 		return "", err
 	}
@@ -158,8 +163,10 @@ func (a *App) initiateExport(ctx context.Context) (string, error) {
 	return exportResp.ExportID, nil
 }
 
-// pollExportStatus periodically checks the status of an export job until it is complete.
+// Polls the export job until it's complete, then returns the download URL.
 func (a *App) pollExportStatus(ctx context.Context, exportID string) (string, error) {
+	url := fmt.Sprintf("https://api.snyk.io/rest/groups/%s/exports/%s?version=2024-10-15", a.config.SnykGroupID, exportID)
+
 	type ExportStatusResponse struct {
 		Status  string `json:"status"`
 		Results struct {
@@ -169,8 +176,6 @@ func (a *App) pollExportStatus(ctx context.Context, exportID string) (string, er
 		} `json:"results,omitempty"`
 	}
 
-	// Corrected URL to use the /rest/ base path.
-	url := fmt.Sprintf("https://api.snyk.io/rest/groups/%s/exports/%s?version=2024-10-15", a.config.SnykGroupID, exportID)
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	pollingCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
@@ -183,33 +188,34 @@ func (a *App) pollExportStatus(ctx context.Context, exportID string) (string, er
 		case <-ticker.C:
 			req, _ := http.NewRequestWithContext(pollingCtx, "GET", url, nil)
 			a.setAuthHeader(req)
+
 			resp, err := a.httpClient.Do(req)
 			if err != nil {
-				a.logger.Warn("Polling check failed", "error", err)
+				a.logger.Warn("Polling failed", "error", err.Error())
 				continue
 			}
+			defer resp.Body.Close()
+
 			var statusResp ExportStatusResponse
 			if err := json.NewDecoder(resp.Body).Decode(&statusResp); err != nil {
-				resp.Body.Close()
-				a.logger.Warn("Failed to decode status response", "error", err)
+				a.logger.Warn("Invalid JSON in polling response", "error", err.Error())
 				continue
 			}
-			resp.Body.Close()
 
-			if statusResp.Status == "FINISHED" {
+			switch statusResp.Status {
+			case "FINISHED":
 				if len(statusResp.Results.Files) > 0 {
 					return statusResp.Results.Files[0].URL, nil
 				}
-				return "", errors.New("export finished but no file URL was provided")
-			}
-			if statusResp.Status == "ERROR" {
+				return "", errors.New("export finished but no file URL provided")
+			case "ERROR":
 				return "", errors.New("export job failed with ERROR status")
 			}
 		}
 	}
 }
 
-// fetchAndProcessCSV downloads the exported data and aggregates it into the DashboardData structure.
+// Downloads and aggregates the CSV export into dashboard data.
 func (a *App) fetchAndProcessCSV(ctx context.Context, fileURL string) (*DashboardData, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", fileURL, nil)
 	if err != nil {
@@ -233,32 +239,41 @@ func (a *App) fetchAndProcessCSV(ctx context.Context, fileURL string) (*Dashboar
 		colIndex[colName] = i
 	}
 
-	issuesBySeverity, issuesByEnvironment := make(map[string]int), make(map[string]int)
-	fixableCriticals, projectIssues := 0, make(map[string]*ProjectInfo)
+	requiredCols := []string{"issue_severity", "computed_fixability", "project_environments", "project_name"}
+	for _, col := range requiredCols {
+		if _, ok := colIndex[col]; !ok {
+			return nil, fmt.Errorf("missing required column: %s", col)
+		}
+	}
+
+	issuesBySeverity := map[string]int{}
+	issuesByEnvironment := map[string]int{}
+	fixableCriticals := 0
+	projectIssues := map[string]*ProjectInfo{}
 
 	for {
 		record, err := reader.Read()
 		if err == io.EOF {
 			break
 		}
-		if err != nil {
+		if err != nil || len(record) < len(header) {
 			continue
 		}
 
 		severity := record[colIndex["issue_severity"]]
 		projectName := record[colIndex["project_name"]]
+		envs := record[colIndex["project_environments"]]
+		fixability := record[colIndex["computed_fixability"]]
 
 		if severity != "" {
 			issuesBySeverity[severity]++
 		}
-
-		if envs := record[colIndex["project_environments"]]; envs != "" {
+		if envs != "" {
 			issuesByEnvironment[envs]++
 		} else {
 			issuesByEnvironment["undefined"]++
 		}
-
-		if severity == "critical" && record[colIndex["computed_fixability"]] == "fixable" {
+		if severity == "critical" && fixability == "fixable" {
 			fixableCriticals++
 		}
 
@@ -284,34 +299,37 @@ func (a *App) fetchAndProcessCSV(ctx context.Context, fileURL string) (*Dashboar
 		return projects[i].HighIssueCount > projects[j].HighIssueCount
 	})
 
-	top5Projects := projects
 	if len(projects) > 5 {
-		top5Projects = projects[:5]
+		projects = projects[:5]
 	}
 
 	return &DashboardData{
 		IssuesBySeverity:      issuesBySeverity,
 		IssuesByEnvironment:   issuesByEnvironment,
 		FixableCriticalIssues: fixableCriticals,
-		Top5RiskiestProjects:  top5Projects,
+		Top5RiskiestProjects:  projects,
 	}, nil
 }
 
-// setAuthHeader adds required headers for Snyk API requests.
+// Adds authorization headers to Snyk requests.
 func (a *App) setAuthHeader(r *http.Request) {
 	r.Header.Set("Authorization", "token "+a.config.SnykToken)
 	r.Header.Set("Content-Type", "application/json")
 }
 
-// respondWithJSON is a helper to write JSON responses.
+// Sends a JSON response to the client.
 func (a *App) respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
-	response, _ := json.Marshal(payload)
+	response, err := json.Marshal(payload)
+	if err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_, _ = w.Write(response)
 }
 
-// getEnv reads an environment variable or returns a default value.
+// Returns env var value or fallback.
 func getEnv(key, fallback string) string {
 	if value, ok := os.LookupEnv(key); ok {
 		return value
