@@ -1,0 +1,32 @@
+# docker-compose.yml for local development and testing.
+# This file defines the services, networks, and volumes for the application stack.
+
+version: '3.8'
+
+services:
+  # Backend Go service
+  backend:
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+    ports:
+      - "8080:8080" # Expose backend port 8080 to the host
+    environment:
+      # For local development, you can set your Snyk credentials here.
+      # In production (EKS), these are managed by Kubernetes Secrets.
+      - SNYK_TOKEN=${SNYK_TOKEN}
+      - SNYK_ORG_ID=${SNYK_ORG_ID}
+      - PORT=8080
+    restart: unless-stopped
+
+  # Frontend React/Nginx service
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend.Dockerfile
+    ports:
+      - "3000:80" # Expose frontend port 80 (Nginx) to host port 3000
+    depends_on:
+      - backend # Ensures backend starts before the frontend
+    restart: unless-stopped
+

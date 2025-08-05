@@ -117,16 +117,15 @@ func (a *App) dataHandler(w http.ResponseWriter, r *http.Request) {
 
 // initiateExport sends a request to Snyk to start a new data export job.
 func (a *App) initiateExport(ctx context.Context) (string, error) {
+	// The request body for an organization-level export only needs the columns.
+	// The 'orgs' filter is only valid for group-level exports. This was the
+	// likely cause of the EOF error.
 	type InitiateExportRequest struct {
-		Filters struct {
-			Orgs []string `json:"orgs"`
-		} `json:"filters"`
 		Columns []string `json:"columns"`
 	}
 	reqBody := InitiateExportRequest{
 		Columns: []string{"issue_severity", "issue_type", "project_environments", "computed_fixability", "project_name"},
 	}
-	reqBody.Filters.Orgs = []string{a.config.SnykOrgID}
 
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
@@ -145,6 +144,12 @@ func (a *App) initiateExport(ctx context.Context) (string, error) {
 		return "", err
 	}
 	defer resp.Body.Close()
+
+	// Check for non-2xx status codes to get better error messages than EOF.
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("snyk API returned a non-successful status code: %d - %s", resp.StatusCode, string(body))
+	}
 
 	type InitiateExportResponse struct {
 		ExportID string `json:"export_id"`
