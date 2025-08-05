@@ -1,0 +1,29 @@
+# docker-compose.yml for local development and testing.
+services:
+  # Backend Go service
+  backend:
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+    # The .env file will automatically provide these variables.
+    environment:
+      - SNYK_TOKEN=${SNYK_TOKEN}
+      - SNYK_GROUP_ID=${SNYK_GROUP_ID}
+      - PORT=8080
+    restart: unless-stopped
+    # # Healthcheck ensures the backend is running before other services depend on it.
+    # healthcheck:
+    #   test: ["CMD", "curl", "-f", "http://localhost:8080"]
+    #   interval: 10s
+    #   timeout: 5s
+    #   retries: 5
+    #   start_period: 10s
+
+  # Frontend React/Nginx service
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend.Dockerfile
+    ports:
+      - "3000:80"
+    restart: unless-stopped

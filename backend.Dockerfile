@@ -1,11 +1,9 @@
 # Stage 1: Build
-FROM golang:1.22-alpine AS builder
+FROM golang:1.23-alpine AS builder
 WORKDIR /app
-COPY backend/go.mod backend/go.sum ./
-RUN go mod download
-COPY backend/ ./
+COPY backend/go.mod ./
+COPY backend/cmd ./
 RUN CGO_ENABLED=0 GOOS=linux go build -o /app/main .
-
 # Stage 2: Final
 FROM alpine:latest
 WORKDIR /app

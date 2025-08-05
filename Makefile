@@ -2,12 +2,16 @@
 
 .PHONY: all build build-go build-react run clean
 
+
 # --- Application Settings ---
 GO_APP_NAME := nis2-dash-backend
-GO_MAIN_DIR := ./backend/cmd/
+GO_MAIN_DIR := ./backend/cmd
 GO_BUILD_DIR := ./build/backend
 
 REACT_APP_DIR := ./frontend
+
+# --- Docker Settings ---
+DOCKER_COMPOSE_FILE := docker-compose.yml
 
 # Default target runs the 'build' target.
 all: build
@@ -33,7 +37,7 @@ build-react:
 # The '--build' flag ensures images are rebuilt if anything has changed.
 run:
 	@echo "--> Running applications with Docker Compose..."
-	docker-compose -f $(DOCKER_COMPOSE_FILE) up --build
+	docker-compose -f $(DOCKER_COMPOSE_FILE) up
 
 # Cleans up build artifacts and stops/removes Docker containers and images.
 clean:
