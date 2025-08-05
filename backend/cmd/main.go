@@ -96,7 +96,7 @@ func (a *App) dataHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	a.logger.Info("Starting Snyk analytics export for enhanced metrics...")
+	a.logger.Info("Starting Snyk analytics exports")
 
 	exportID, err := a.initiateExport(ctx)
 	if err != nil {
@@ -311,10 +311,12 @@ func (a *App) fetchAndProcessCSV(ctx context.Context, fileURL string) (*Dashboar
 	}, nil
 }
 
-// Adds authorization headers to Snyk requests.
+// setAuthHeader adds the authorization header to the Snyk request.
 func (a *App) setAuthHeader(r *http.Request) {
+	if r == nil {
+		return
+	}
 	r.Header.Set("Authorization", "token "+a.config.SnykToken)
-	r.Header.Set("Content-Type", "application/json")
 }
 
 // Sends a JSON response to the client.
