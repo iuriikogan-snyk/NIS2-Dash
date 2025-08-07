@@ -53,22 +53,48 @@ type DashboardData struct {
 	Top5RiskiestProjects  []ProjectInfo  `json:"top5RiskiestProjects"`
 }
 
-// SnykExportRequest is the request body for the Snyk export API.
-type SnykExportRequest struct {
-	Columns []string           `json:"columns"`
-	Filters *SnykExportFilters `json:"filters,omitempty"`
+// SnykAPIRequest is the request body for the Snyk export API.
+type SnykAPIRequest struct {
+	Data RequestData `json:"data"`
 }
 
-// SnykExportFilters holds the filtering options for the Snyk export API.
+// RequestData represents the "data" field in the Snyk API request.
+type RequestData struct {
+	Type       string            `json:"type"`
+	Attributes RequestAttributes `json:"attributes"`
+}
+
+// RequestAttributes represents the "attributes" field in the Snyk API request.
+type RequestAttributes struct {
+	Formats     []string           `json:"formats"`
+	Columns     []string           `json:"columns"`
+	Dataset     string             `json:"dataset"`
+	Destination RequestDestination `json:"destination"`
+	Filters     RequestFilters     `json:"filters"`
+}
+
+// RequestDestination represents the "destination" field in the Snyk API request.
+type RequestDestination struct {
+	Type string `json:"type"`
+}
+
+// RequestFilters represents the "filters" field in the Snyk API request.
+type RequestFilters struct {
+	Orgs       []string          `json:"orgs"`
+	Introduced RequestIntroduced `json:"introduced"`
+}
+
+// RequestIntroduced represents the "introduced" filter.
+type RequestIntroduced struct {
+	From string `json:"from,omitempty"`
+	To   string `json:"to,omitempty"`
+}
+
+// SnykExportFilters holds the filtering options passed from the frontend.
 type SnykExportFilters struct {
-	IntroducedFrom string   `json:"introduced_from,omitempty"`
-	IntroducedTo   string   `json:"introduced_to,omitempty"`
-	UpdatedFrom    string   `json:"updated_from,omitempty"`
-	UpdatedTo      string   `json:"updated_to,omitempty"`
-	Orgs           []string `json:"organizations,omitempty"`
-	Environments   []string `json:"project_environment,omitempty"`
-	Lifecycles     []string `json:"project_lifecycle,omitempty"`
-	Severities     []string `json:"severities,omitempty"`
+	IntroducedFrom string
+	IntroducedTo   string
+	Orgs           []string
 }
 
 // Creates and returns a new App instance.
@@ -122,12 +148,7 @@ func (a *App) dataHandler(w http.ResponseWriter, r *http.Request) {
 	filters := &SnykExportFilters{
 		IntroducedFrom: parseDateParam(queryParams.Get("introduced_from")),
 		IntroducedTo:   parseDateParam(queryParams.Get("introduced_to")),
-		UpdatedFrom:    parseDateParam(queryParams.Get("updated_from")),
-		UpdatedTo:      parseDateParam(queryParams.Get("updated_to")),
 		Orgs:           splitAndClean(queryParams.Get("orgs")),
-		Environments:   splitAndClean(queryParams.Get("env")),
-		Lifecycles:     splitAndClean(queryParams.Get("lifecycle")),
-		Severities:     splitAndClean(queryParams.Get("severities")),
 	}
 
 	exportID, err := a.initiateExport(ctx, filters)
@@ -156,9 +177,29 @@ func (a *App) dataHandler(w http.ResponseWriter, r *http.Request) {
 
 // Starts a new Snyk export job and returns the export ID.
 func (a *App) initiateExport(ctx context.Context, filters *SnykExportFilters) (string, error) {
-	reqBody := SnykExportRequest{
-		Columns: []string{"issue_severity", "issue_type", "project_environments", "computed_fixability", "project_name"},
-		Filters: filters,
+	reqBody := SnykAPIRequest{
+		Data: RequestData{
+			Type: "resource",
+			Attributes: RequestAttributes{
+				Formats: []string{"csv"},
+				Columns: []string{
+					"issue_severity_rank", "issue_severity", "score", "problem_title", "cve", "cwe",
+					"project_name", "project_url", "exploit_maturity", "first_introduced",
+					"product_name", "issue_url", "issue_type", "computed_fixability", "project_environments",
+				},
+				Dataset: "issues",
+				Destination: RequestDestination{
+					Type: "snyk",
+				},
+				Filters: RequestFilters{
+					Orgs: filters.Orgs,
+					Introduced: RequestIntroduced{
+						From: filters.IntroducedFrom,
+						To:   filters.IntroducedTo,
+					},
+				},
+			},
+		},
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)

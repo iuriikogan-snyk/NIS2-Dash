@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { PieChart } from 'react-minimal-pie-chart';
 import './App.css';
 
@@ -39,16 +39,29 @@ const PieChartComponent = ({ data, title }) => {
 function App() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [orgs, setOrgs] = useState('');
+  const [introducedFrom, setIntroducedFrom] = useState('');
+  const [introducedTo, setIntroducedTo] = useState('');
 
-  useEffect(() => {
-    fetch('/api/data')
+  const fetchData = () => {
+    setLoading(true);
+    setError('');
+    const params = new URLSearchParams({
+      orgs,
+      introduced_from: introducedFrom,
+      introduced_to: introducedTo,
+    });
+
+    fetch(`/api/data?${params}`)
       .then(response => {
         if (!response.ok) throw new Error('Network response was not ok');
         return response.json();
       })
       .then(data => setData(data))
-      .catch(err => setError('Failed to load data. Ensure the backend is running.'));
-  }, []);
+      .catch(err => setError('Failed to load data. Ensure the backend is running and parameters are correct.'))
+      .finally(() => setLoading(false));
+  };
 
   return (
     <div className="App">
@@ -56,8 +69,19 @@ function App() {
         <h1>NIS2 Compliance Dashboard</h1>
       </header>
       <main className="dashboard">
+        <div className="filter-form">
+          <input type="text" value={orgs} onChange={e => setOrgs(e.target.value)} placeholder="Snyk Orgs (comma-separated)" />
+          <input type="date" value={introducedFrom} onChange={e => setIntroducedFrom(e.target.value)} />
+          <input type="date" value={introducedTo} onChange={e => setIntroducedTo(e.target.value)} />
+          <button onClick={fetchData} disabled={loading}>
+            {loading ? 'Loading...' : 'Get Data'}
+          </button>
+        </div>
+
         {error && <p className="error">{error}</p>}
-        {data ? (
+        {loading && !error && <p>Loading and processing Snyk data...</p>}
+
+        {data && !loading && (
           <>
             <div className="kpi-row">
               <div className="card kpi">
@@ -84,8 +108,6 @@ function App() {
               </ul>
             </div>
           </>
-        ) : (
-          !error && <p>Loading and processing Snyk data...</p>
         )}
       </main>
     </div>
