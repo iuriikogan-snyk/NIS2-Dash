@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -49,6 +51,24 @@ type DashboardData struct {
 	IssuesByEnvironment   map[string]int `json:"issuesByEnvironment"`
 	FixableCriticalIssues int            `json:"fixableCriticalIssues"`
 	Top5RiskiestProjects  []ProjectInfo  `json:"top5RiskiestProjects"`
+}
+
+// SnykExportRequest is the request body for the Snyk export API.
+type SnykExportRequest struct {
+	Columns []string           `json:"columns"`
+	Filters *SnykExportFilters `json:"filters,omitempty"`
+}
+
+// SnykExportFilters holds the filtering options for the Snyk export API.
+type SnykExportFilters struct {
+	IntroducedFrom string   `json:"introduced_from,omitempty"`
+	IntroducedTo   string   `json:"introduced_to,omitempty"`
+	UpdatedFrom    string   `json:"updated_from,omitempty"`
+	UpdatedTo      string   `json:"updated_to,omitempty"`
+	Orgs           []string `json:"organizations,omitempty"`
+	Environments   []string `json:"project_environment,omitempty"`
+	Lifecycles     []string `json:"project_lifecycle,omitempty"`
+	Severities     []string `json:"severities,omitempty"`
 }
 
 // Creates and returns a new App instance.
@@ -98,7 +118,19 @@ func (a *App) dataHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	a.logger.Info("Starting Snyk analytics exports")
 
-	exportID, err := a.initiateExport(ctx)
+	queryParams := r.URL.Query()
+	filters := &SnykExportFilters{
+		IntroducedFrom: parseDateParam(queryParams.Get("introduced_from")),
+		IntroducedTo:   parseDateParam(queryParams.Get("introduced_to")),
+		UpdatedFrom:    parseDateParam(queryParams.Get("updated_from")),
+		UpdatedTo:      parseDateParam(queryParams.Get("updated_to")),
+		Orgs:           splitAndClean(queryParams.Get("orgs")),
+		Environments:   splitAndClean(queryParams.Get("env")),
+		Lifecycles:     splitAndClean(queryParams.Get("lifecycle")),
+		Severities:     splitAndClean(queryParams.Get("severities")),
+	}
+
+	exportID, err := a.initiateExport(ctx, filters)
 	if err != nil {
 		a.logger.Error("Failed to initiate export", "error", err.Error())
 		http.Error(w, "Failed to initiate Snyk export", http.StatusInternalServerError)
@@ -123,11 +155,10 @@ func (a *App) dataHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // Starts a new Snyk export job and returns the export ID.
-func (a *App) initiateExport(ctx context.Context) (string, error) {
-	reqBody := struct {
-		Columns []string `json:"columns"`
-	}{
+func (a *App) initiateExport(ctx context.Context, filters *SnykExportFilters) (string, error) {
+	reqBody := SnykExportRequest{
 		Columns: []string{"issue_severity", "issue_type", "project_environments", "computed_fixability", "project_name"},
+		Filters: filters,
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)
@@ -154,13 +185,15 @@ func (a *App) initiateExport(ctx context.Context) (string, error) {
 	}
 
 	var exportResp struct {
-		ExportID string `json:"export_id"`
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&exportResp); err != nil {
 		return "", err
 	}
 
-	return exportResp.ExportID, nil
+	return exportResp.Data.ID, nil
 }
 
 // Polls the export job until it's complete, then returns the download URL.
@@ -168,12 +201,16 @@ func (a *App) pollExportStatus(ctx context.Context, exportID string) (string, er
 	url := fmt.Sprintf("https://api.snyk.io/rest/groups/%s/exports/%s?version=2024-10-15", a.config.SnykGroupID, exportID)
 
 	type ExportStatusResponse struct {
-		Status  string `json:"status"`
-		Results struct {
-			Files []struct {
-				URL string `json:"url"`
-			} `json:"files,omitempty"`
-		} `json:"results,omitempty"`
+		Data struct {
+			Attributes struct {
+				Status  string `json:"status"`
+				Results struct {
+					Files []struct {
+						URL string `json:"url"`
+					} `json:"files,omitempty"`
+				} `json:"results,omitempty"`
+			} `json:"attributes"`
+		} `json:"data"`
 	}
 
 	ticker := time.NewTicker(5 * time.Second)
@@ -202,10 +239,10 @@ func (a *App) pollExportStatus(ctx context.Context, exportID string) (string, er
 				continue
 			}
 
-			switch statusResp.Status {
+			switch statusResp.Data.Attributes.Status {
 			case "FINISHED":
-				if len(statusResp.Results.Files) > 0 {
-					return statusResp.Results.Files[0].URL, nil
+				if len(statusResp.Data.Attributes.Results.Files) > 0 {
+					return statusResp.Data.Attributes.Results.Files[0].URL, nil
 				}
 				return "", errors.New("export finished but no file URL provided")
 			case "ERROR":
@@ -317,6 +354,36 @@ func (a *App) setAuthHeader(r *http.Request) {
 		return
 	}
 	r.Header.Set("Authorization", "token "+a.config.SnykToken)
+}
+
+// splitAndClean takes a comma-separated string, splits it, and trims whitespace.
+func splitAndClean(input string) []string {
+	if input == "" {
+		return nil
+	}
+	parts := strings.Split(input, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		trimmed := strings.TrimSpace(p)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+// parseDateParam converts a string into a date string for the Snyk API.
+// It can be an integer for relative days, or a pre-formatted date string.
+func parseDateParam(dateStr string) string {
+	if dateStr == "" {
+		return ""
+	}
+	// Try to parse as integer offset (number of days from now)
+	if days, err := strconv.Atoi(dateStr); err == nil {
+		return time.Now().UTC().AddDate(0, 0, days).Format("2006-01-02T00:00:00Z")
+	}
+	// Otherwise, assume it's already a formatted date string
+	return dateStr
 }
 
 // Sends a JSON response to the client.
