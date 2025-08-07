@@ -43,6 +43,11 @@ function App() {
   const [orgs, setOrgs] = useState('');
   const [introducedFrom, setIntroducedFrom] = useState('');
   const [introducedTo, setIntroducedTo] = useState('');
+  const [updatedFrom, setUpdatedFrom] = useState('');
+  const [updatedTo, setUpdatedTo] = useState('');
+  const [environments, setEnvironments] = useState('');
+  const [lifecycles, setLifecycles] = useState('');
+  const [severities, setSeverities] = useState('');
 
   const fetchData = () => {
     setLoading(true);
@@ -51,6 +56,11 @@ function App() {
       orgs,
       introduced_from: introducedFrom,
       introduced_to: introducedTo,
+      updated_from: updatedFrom,
+      updated_to: updatedTo,
+      env: environments,
+      lifecycle: lifecycles,
+      severities,
     });
 
     fetch(`/api/data?${params}`)
@@ -73,6 +83,11 @@ function App() {
           <input type="text" value={orgs} onChange={e => setOrgs(e.target.value)} placeholder="Snyk Orgs (comma-separated)" />
           <input type="date" value={introducedFrom} onChange={e => setIntroducedFrom(e.target.value)} />
           <input type="date" value={introducedTo} onChange={e => setIntroducedTo(e.target.value)} />
+          <input type="date" value={updatedFrom} onChange={e => setUpdatedFrom(e.target.value)} />
+          <input type="date" value={updatedTo} onChange={e => setUpdatedTo(e.target.value)} />
+          <input type="text" value={environments} onChange={e => setEnvironments(e.target.value)} placeholder="Environments (comma-separated)" />
+          <input type="text" value={lifecycles} onChange={e => setLifecycles(e.target.value)} placeholder="Lifecycles (comma-separated)" />
+          <input type="text" value={severities} onChange={e => setSeverities(e.target.value)} placeholder="Severities (comma-separated)" />
           <button onClick={fetchData} disabled={loading}>
             {loading ? 'Loading...' : 'Get Data'}
           </button>

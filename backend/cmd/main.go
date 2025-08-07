@@ -80,21 +80,30 @@ type RequestDestination struct {
 
 // RequestFilters represents the "filters" field in the Snyk API request.
 type RequestFilters struct {
-	Orgs       []string          `json:"orgs"`
-	Introduced RequestIntroduced `json:"introduced"`
+	Orgs                []string          `json:"orgs"`
+	Introduced          RequestDateRange  `json:"introduced,omitempty"`
+	Updated             RequestDateRange  `json:"updated,omitempty"`
+	ProjectEnvironments []string          `json:"project_environment,omitempty"`
+	ProjectLifecycles   []string          `json:"project_lifecycle,omitempty"`
+	Severities          []string          `json:"severities,omitempty"`
 }
 
-// RequestIntroduced represents the "introduced" filter.
-type RequestIntroduced struct {
+// RequestDateRange represents a date range filter.
+type RequestDateRange struct {
 	From string `json:"from,omitempty"`
 	To   string `json:"to,omitempty"`
 }
 
 // SnykExportFilters holds the filtering options passed from the frontend.
 type SnykExportFilters struct {
-	IntroducedFrom string
-	IntroducedTo   string
-	Orgs           []string
+	IntroducedFrom      string
+	IntroducedTo        string
+	UpdatedFrom         string
+	UpdatedTo           string
+	Orgs                []string
+	ProjectEnvironments []string
+	ProjectLifecycles   []string
+	Severities          []string
 }
 
 // Creates and returns a new App instance.
@@ -146,9 +155,14 @@ func (a *App) dataHandler(w http.ResponseWriter, r *http.Request) {
 
 	queryParams := r.URL.Query()
 	filters := &SnykExportFilters{
-		IntroducedFrom: parseDateParam(queryParams.Get("introduced_from")),
-		IntroducedTo:   parseDateParam(queryParams.Get("introduced_to")),
-		Orgs:           splitAndClean(queryParams.Get("orgs")),
+		IntroducedFrom:      parseDateParam(queryParams.Get("introduced_from")),
+		IntroducedTo:        parseDateParam(queryParams.Get("introduced_to")),
+		UpdatedFrom:         parseDateParam(queryParams.Get("updated_from")),
+		UpdatedTo:           parseDateParam(queryParams.Get("updated_to")),
+		Orgs:                splitAndClean(queryParams.Get("orgs")),
+		ProjectEnvironments: splitAndClean(queryParams.Get("env")),
+		ProjectLifecycles:   splitAndClean(queryParams.Get("lifecycle")),
+		Severities:          splitAndClean(queryParams.Get("severities")),
 	}
 
 	exportID, err := a.initiateExport(ctx, filters)
@@ -193,10 +207,17 @@ func (a *App) initiateExport(ctx context.Context, filters *SnykExportFilters) (s
 				},
 				Filters: RequestFilters{
 					Orgs: filters.Orgs,
-					Introduced: RequestIntroduced{
+					Introduced: RequestDateRange{
 						From: filters.IntroducedFrom,
 						To:   filters.IntroducedTo,
 					},
+					Updated: RequestDateRange{
+						From: filters.UpdatedFrom,
+						To:   filters.UpdatedTo,
+					},
+					ProjectEnvironments: filters.ProjectEnvironments,
+					ProjectLifecycles:   filters.ProjectLifecycles,
+					Severities:          filters.Severities,
 				},
 			},
 		},
