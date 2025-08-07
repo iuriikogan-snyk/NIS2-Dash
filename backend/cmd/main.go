@@ -153,16 +153,11 @@ func (a *App) dataHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	a.logger.Info("Starting Snyk analytics exports")
 
-	queryParams := r.URL.Query()
+	// Hardcoded filters for demo purposes
 	filters := &SnykExportFilters{
-		IntroducedFrom:      parseDateParam(queryParams.Get("introduced_from")),
-		IntroducedTo:        parseDateParam(queryParams.Get("introduced_to")),
-		UpdatedFrom:         parseDateParam(queryParams.Get("updated_from")),
-		UpdatedTo:           parseDateParam(queryParams.Get("updated_to")),
-		Orgs:                splitAndClean(queryParams.Get("orgs")),
-		ProjectEnvironments: splitAndClean(queryParams.Get("env")),
-		ProjectLifecycles:   splitAndClean(queryParams.Get("lifecycle")),
-		Severities:          splitAndClean(queryParams.Get("severities")),
+		IntroducedFrom: "2025-01-30T00:00:00Z",
+		IntroducedTo:   "2025-04-01T00:00:00Z",
+		Orgs:           []string{"42342811-183436-482396-a3g491d-22257267bb8eca"},
 	}
 
 	exportID, err := a.initiateExport(ctx, filters)

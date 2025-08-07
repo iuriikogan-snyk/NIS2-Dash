@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { PieChart } from 'react-minimal-pie-chart';
 import './App.css';
 
@@ -39,39 +39,18 @@ const PieChartComponent = ({ data, title }) => {
 function App() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [orgs, setOrgs] = useState('');
-  const [introducedFrom, setIntroducedFrom] = useState('');
-  const [introducedTo, setIntroducedTo] = useState('');
-  const [updatedFrom, setUpdatedFrom] = useState('');
-  const [updatedTo, setUpdatedTo] = useState('');
-  const [environments, setEnvironments] = useState('');
-  const [lifecycles, setLifecycles] = useState('');
-  const [severities, setSeverities] = useState('');
+  const [loading, setLoading] = useState(true);
 
-  const fetchData = () => {
-    setLoading(true);
-    setError('');
-    const params = new URLSearchParams({
-      orgs,
-      introduced_from: introducedFrom,
-      introduced_to: introducedTo,
-      updated_from: updatedFrom,
-      updated_to: updatedTo,
-      env: environments,
-      lifecycle: lifecycles,
-      severities,
-    });
-
-    fetch(`/api/data?${params}`)
+  useEffect(() => {
+    fetch('/api/data')
       .then(response => {
         if (!response.ok) throw new Error('Network response was not ok');
         return response.json();
       })
       .then(data => setData(data))
-      .catch(err => setError('Failed to load data. Ensure the backend is running and parameters are correct.'))
+      .catch(err => setError('Failed to load data. Ensure the backend is running.'))
       .finally(() => setLoading(false));
-  };
+  }, []);
 
   return (
     <div className="App">
@@ -79,20 +58,6 @@ function App() {
         <h1>NIS2 Compliance Dashboard</h1>
       </header>
       <main className="dashboard">
-        <div className="filter-form">
-          <input type="text" value={orgs} onChange={e => setOrgs(e.target.value)} placeholder="Snyk Orgs (comma-separated)" />
-          <input type="date" value={introducedFrom} onChange={e => setIntroducedFrom(e.target.value)} />
-          <input type="date" value={introducedTo} onChange={e => setIntroducedTo(e.target.value)} />
-          <input type="date" value={updatedFrom} onChange={e => setUpdatedFrom(e.target.value)} />
-          <input type="date" value={updatedTo} onChange={e => setUpdatedTo(e.target.value)} />
-          <input type="text" value={environments} onChange={e => setEnvironments(e.target.value)} placeholder="Environments (comma-separated)" />
-          <input type="text" value={lifecycles} onChange={e => setLifecycles(e.target.value)} placeholder="Lifecycles (comma-separated)" />
-          <input type="text" value={severities} onChange={e => setSeverities(e.target.value)} placeholder="Severities (comma-separated)" />
-          <button onClick={fetchData} disabled={loading}>
-            {loading ? 'Loading...' : 'Get Data'}
-          </button>
-        </div>
-
         {error && <p className="error">{error}</p>}
         {loading && !error && <p>Loading and processing Snyk data...</p>}
 
@@ -130,3 +95,4 @@ function App() {
 }
 
 export default App;
+
