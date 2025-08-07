@@ -38,30 +38,76 @@ const PieChartComponent = ({ data, title }) => {
 
 function App() {
   const [data, setData] = useState(null);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/data')
-      .then(response => {
-        if (!response.ok) throw new Error('Network response was not ok');
-        return response.json();
-      })
-      .then(data => setData(data))
-      .catch(err => setError('Failed to load data. Ensure the backend is running.'))
-      .finally(() => setLoading(false));
+    const csvData = `
+    SCORE;CVE;CWE;FIRST_INTRODUCED;PROJECT_NAME;PROJECT_URL;PRODUCT_NAME;ORG_DISPLAY_NAME;ISSUE_SEVERITY;EXPLOIT_MATURITY;COMPUTED_FIXABILITY;ISSUE_URL;ISSUE_TYPE
+    103;"[""CVE-2007-5686""]";"[""CWE-264""]";2024-10-25 17:14:34.017;iuriikogan-snyk/nodejs-goof:linux-arm64;https://app.snyk.io/org/cbir-techops/project/556f84a6-0075-41cf-a7a1-a76d87a99b9a;Snyk Container;CBIR - TechOps;Low;No Known Exploit;No Fix Supported;https://app.snyk.io/org/cbir-techops/project/556f84a6-0075-41cf-a7a1-a76d87a99b9a#issue-SNYK-DEBIAN12-SHADOW-1559391;Vulnerability
+    125;"[""CVE-2019-9192""]";"[""CWE-674""]";2024-10-25 17:14:34.017;iuriikogan-snyk/nodejs-goof:linux-arm64;https://app.snyk.io/org/cbir-techops/project/556f84a6-0075-41cf-a7a1-a76d87a99b9a;Snyk Container;CBIR - TechOps;Low;No Known Exploit;No Fix Supported;https://app.snyk.io/org/cbir-techops/project/556f84a6-0075-41cf-a7a1-a76d87a99b9a#issue-SNYK-DEBIAN12-GLIBC-1547069;Vulnerability
+    `;
+
+    const processData = (csv) => {
+      const lines = csv.trim().split('\n');
+      const header = lines[0].split(';');
+      const records = lines.slice(1).map(line => line.split(';'));
+
+      const issuesBySeverity = {};
+      const issuesByEnvironment = {};
+      let fixableCriticalIssues = 0;
+      const projectIssues = {};
+
+      const severityIndex = header.indexOf('ISSUE_SEVERITY');
+      const fixabilityIndex = header.indexOf('COMPUTED_FIXABILITY');
+      const projectNameIndex = header.indexOf('PROJECT_NAME');
+
+      records.forEach(record => {
+        const severity = record[severityIndex];
+        const fixability = record[fixabilityIndex];
+        const projectName = record[projectNameIndex];
+
+        if (severity) {
+          issuesBySeverity[severity] = (issuesBySeverity[severity] || 0) + 1;
+        }
+
+        if (projectName) {
+          if (!projectIssues[projectName]) {
+            projectIssues[projectName] = { name: projectName, criticalIssueCount: 0, highIssueCount: 0 };
+          }
+          if (severity === 'Critical') {
+            projectIssues[projectName].criticalIssueCount++;
+          }
+          if (severity === 'High') {
+            projectIssues[projectName].highIssueCount++;
+          }
+        }
+
+        if (severity === 'Critical' && fixability === 'Fixable') {
+          fixableCriticalIssues++;
+        }
+      });
+
+      const top5RiskiestProjects = Object.values(projectIssues)
+        .sort((a, b) => b.criticalIssueCount - a.criticalIssueCount || b.highIssueCount - a.highIssueCount)
+        .slice(0, 5);
+
+      setData({
+        issuesBySeverity,
+        issuesByEnvironment: { Production: 10, Staging: 5, Development: 20 }, // Example data
+        fixableCriticalIssues,
+        top5RiskiestProjects,
+      });
+    };
+
+    processData(csvData);
   }, []);
 
   return (
     <div className="App">
       <header className="App-header">
-        <h1>NIS2 Compliance Dashboard</h1>
+        <h1>Snyk Export API Dash</h1>
       </header>
       <main className="dashboard">
-        {error && <p className="error">{error}</p>}
-        {loading && !error && <p>Loading and processing Snyk data...</p>}
-
-        {data && !loading && (
+        {data ? (
           <>
             <div className="kpi-row">
               <div className="card kpi">
@@ -88,6 +134,8 @@ function App() {
               </ul>
             </div>
           </>
+        ) : (
+          <p>Loading and processing Snyk data...</p>
         )}
       </main>
     </div>

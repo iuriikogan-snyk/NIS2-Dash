@@ -26,9 +26,10 @@ import (
 
 // Config holds environment-based settings.
 type Config struct {
-	SnykToken   string
-	SnykGroupID string
-	Port        string
+	SnykToken      string
+	SnykGroupID    string
+	SnykApiBaseUrl string // Added to support different Snyk regions (e.g., EU, AU)
+	Port           string
 }
 
 // App holds app-wide dependencies.
@@ -80,12 +81,12 @@ type RequestDestination struct {
 
 // RequestFilters represents the "filters" field in the Snyk API request.
 type RequestFilters struct {
-	Orgs                []string          `json:"orgs"`
-	Introduced          RequestDateRange  `json:"introduced,omitempty"`
-	Updated             RequestDateRange  `json:"updated,omitempty"`
-	ProjectEnvironments []string          `json:"project_environment,omitempty"`
-	ProjectLifecycles   []string          `json:"project_lifecycle,omitempty"`
-	Severities          []string          `json:"severities,omitempty"`
+	Orgs                []string         `json:"orgs"`
+	Introduced          RequestDateRange `json:"introduced,omitempty"`
+	Updated             RequestDateRange `json:"updated,omitempty"`
+	ProjectEnvironments []string         `json:"project_environment,omitempty"`
+	ProjectLifecycles   []string         `json:"project_lifecycle,omitempty"`
+	Severities          []string         `json:"severities,omitempty"`
 }
 
 // RequestDateRange represents a date range filter.
@@ -106,22 +107,23 @@ type SnykExportFilters struct {
 	Severities          []string
 }
 
-// Creates and returns a new App instance.
+// NewApp creates and returns a new App instance.
 func NewApp(cfg Config, logger *slog.Logger) *App {
 	return &App{
 		config:     cfg,
 		logger:     logger,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: &http.Client{Timeout: 60 * time.Second}, // Increased timeout for potentially long-running requests
 	}
 }
 
-// Entry point of the application.
+// main is the entry point of the application.
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{}))
 	cfg := Config{
-		SnykToken:   os.Getenv("SNYK_TOKEN"),
-		SnykGroupID: os.Getenv("SNYK_GROUP_ID"),
-		Port:        getEnv("PORT", "8080"),
+		SnykToken:      os.Getenv("SNYK_TOKEN"),
+		SnykGroupID:    os.Getenv("SNYK_GROUP_ID"),
+		SnykApiBaseUrl: getEnv("SNYK_API_BASE_URL", "https://api.snyk.io"), // Make base URL configurable
+		Port:           getEnv("PORT", "8080"),
 	}
 	if cfg.SnykToken == "" || cfg.SnykGroupID == "" {
 		logger.Error("SNYK_TOKEN and SNYK_GROUP_ID must be set")
@@ -135,7 +137,7 @@ func main() {
 	mux.HandleFunc("/api/data", app.dataHandler)
 
 	// Start HTTP server
-	logger.Info("Backend server starting", "port", cfg.Port)
+	logger.Info("Backend server starting", "port", cfg.Port, "snyk_api_url", cfg.SnykApiBaseUrl)
 	server := &http.Server{Addr: ":" + cfg.Port, Handler: mux}
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Error("Server failed to start", "error", err)
@@ -143,7 +145,7 @@ func main() {
 	}
 }
 
-// Handles GET /api/data by exporting, polling, and processing Snyk data.
+// dataHandler handles GET /api/data by exporting, polling, and processing Snyk data.
 func (a *App) dataHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
@@ -153,11 +155,31 @@ func (a *App) dataHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	a.logger.Info("Starting Snyk analytics exports")
 
-	// Hardcoded filters for demo purposes
+	// Parse filters from URL query parameters
+	queryParams := r.URL.Query()
+	orgs := splitAndClean(queryParams.Get("orgs"))
+
+	// If no orgs are specified in the query, fetch all orgs from the group
+	if len(orgs) == 0 {
+		a.logger.Info("No orgs specified, fetching all orgs in the group")
+		fetchedOrgs, err := a.getOrgsInGroup(ctx)
+		if err != nil {
+			a.logger.Error("Failed to fetch organizations in group", "error", err.Error())
+			http.Error(w, "Failed to fetch Snyk organizations", http.StatusInternalServerError)
+			return
+		}
+		orgs = fetchedOrgs
+	}
+
 	filters := &SnykExportFilters{
-		IntroducedFrom: "2025-01-30T00:00:00Z",
-		IntroducedTo:   "2025-04-01T00:00:00Z",
-		Orgs:           []string{"42342811-183436-482396-a3g491d-22257267bb8eca"},
+		IntroducedFrom:      parseDateParam(queryParams.Get("introduced_from")),
+		IntroducedTo:        parseDateParam(queryParams.Get("introduced_to")),
+		UpdatedFrom:         parseDateParam(queryParams.Get("updated_from")),
+		UpdatedTo:           parseDateParam(queryParams.Get("updated_to")),
+		Orgs:                orgs,
+		ProjectEnvironments: splitAndClean(queryParams.Get("env")),
+		ProjectLifecycles:   splitAndClean(queryParams.Get("lifecycle")),
+		Severities:          splitAndClean(queryParams.Get("severities")),
 	}
 
 	exportID, err := a.initiateExport(ctx, filters)
@@ -166,6 +188,7 @@ func (a *App) dataHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to initiate Snyk export", http.StatusInternalServerError)
 		return
 	}
+	a.logger.Info("Snyk export initiated", "exportID", exportID)
 
 	fileURL, err := a.pollExportStatus(ctx, exportID)
 	if err != nil {
@@ -173,6 +196,7 @@ func (a *App) dataHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to complete Snyk export", http.StatusInternalServerError)
 		return
 	}
+	a.logger.Info("Snyk export finished, CSV ready for download", "url", fileURL)
 
 	dashboardData, err := a.fetchAndProcessCSV(ctx, fileURL)
 	if err != nil {
@@ -184,32 +208,93 @@ func (a *App) dataHandler(w http.ResponseWriter, r *http.Request) {
 	a.respondWithJSON(w, http.StatusOK, dashboardData)
 }
 
-// Starts a new Snyk export job and returns the export ID.
+// getOrgsInGroup fetches all organization IDs for the configured Snyk group.
+func (a *App) getOrgsInGroup(ctx context.Context) ([]string, error) {
+	var allOrgIDs []string
+	// Use a recent, stable API version for listing organizations.
+	url := fmt.Sprintf("%s/rest/groups/%s/orgs?version=2024-07-29&limit=100", a.config.SnykApiBaseUrl, a.config.SnykGroupID)
+
+	type OrgListResponse struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+		Links struct {
+			Next string `json:"next,omitempty"`
+		} `json:"links"`
+	}
+
+	for url != "" {
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request to fetch orgs: %w", err)
+		}
+		a.setAuthHeader(req)
+
+		resp, err := a.httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("request to fetch orgs failed: %w", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			return nil, fmt.Errorf("failed to fetch orgs, Snyk API returned status %d: %s", resp.StatusCode, string(body))
+		}
+
+		var orgResp OrgListResponse
+		if err := json.NewDecoder(resp.Body).Decode(&orgResp); err != nil {
+			resp.Body.Close()
+			return nil, fmt.Errorf("failed to decode orgs response: %w", err)
+		}
+		resp.Body.Close()
+
+		for _, org := range orgResp.Data {
+			allOrgIDs = append(allOrgIDs, org.ID)
+		}
+
+		// Handle pagination
+		if orgResp.Links.Next != "" {
+			url = fmt.Sprintf("%s%s", a.config.SnykApiBaseUrl, orgResp.Links.Next)
+		} else {
+			url = ""
+		}
+	}
+
+	return allOrgIDs, nil
+}
+
+// initiateExport starts a new Snyk export job and returns the export ID.
 func (a *App) initiateExport(ctx context.Context, filters *SnykExportFilters) (string, error) {
 	reqBody := SnykAPIRequest{
 		Data: RequestData{
-			Type: "resource",
+			Type: "export",
 			Attributes: RequestAttributes{
 				Formats: []string{"csv"},
 				Columns: []string{
-					"issue_severity_rank", "issue_severity", "score", "problem_title", "cve", "cwe",
-					"project_name", "project_url", "exploit_maturity", "first_introduced",
-					"product_name", "issue_url", "issue_type", "computed_fixability", "project_environments",
+					"ISSUE_SEVERITY",
+					"SCORE",
+					"CVE",
+					"CWE",
+					"ORG_DISPLAY_NAME",
+					"PROJECT_NAME",
+					"PROJECT_URL",
+					"EXPLOIT_MATURITY",
+					"COMPUTED_FIXABILITY",
+					"FIRST_INTRODUCED",
+					"PRODUCT_NAME",
+					"ISSUE_URL",
+					"ISSUE_STATUS_INDICATOR",
+					"ISSUE_TYPE",
+					"PROJECT_ENVIRONMENTS",
 				},
 				Dataset: "issues",
 				Destination: RequestDestination{
 					Type: "snyk",
 				},
 				Filters: RequestFilters{
-					Orgs: filters.Orgs,
-					Introduced: RequestDateRange{
-						From: filters.IntroducedFrom,
-						To:   filters.IntroducedTo,
-					},
-					Updated: RequestDateRange{
-						From: filters.UpdatedFrom,
-						To:   filters.UpdatedTo,
-					},
+					Orgs:                filters.Orgs,
+					Introduced:          RequestDateRange{From: filters.IntroducedFrom, To: filters.IntroducedTo},
+					Updated:             RequestDateRange{From: filters.UpdatedFrom, To: filters.UpdatedTo},
 					ProjectEnvironments: filters.ProjectEnvironments,
 					ProjectLifecycles:   filters.ProjectLifecycles,
 					Severities:          filters.Severities,
@@ -223,12 +308,13 @@ func (a *App) initiateExport(ctx context.Context, filters *SnykExportFilters) (s
 		return "", fmt.Errorf("failed to marshal request body: %w", err)
 	}
 
-	url := fmt.Sprintf("https://api.snyk.io/rest/groups/%s/exports?version=2024-10-15", a.config.SnykGroupID)
+	url := fmt.Sprintf("%s/rest/groups/%s/exports?version=2024-10-15", a.config.SnykApiBaseUrl, a.config.SnykGroupID)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(bodyBytes))
 	if err != nil {
 		return "", err
 	}
 	a.setAuthHeader(req)
+	req.Header.Set("Content-Type", "application/vnd.api+json")
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
@@ -238,7 +324,7 @@ func (a *App) initiateExport(ctx context.Context, filters *SnykExportFilters) (s
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("Snyk API returned %d: %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("Snyk API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var exportResp struct {
@@ -253,9 +339,9 @@ func (a *App) initiateExport(ctx context.Context, filters *SnykExportFilters) (s
 	return exportResp.Data.ID, nil
 }
 
-// Polls the export job until it's complete, then returns the download URL.
+// pollExportStatus polls the export job until it's complete, then returns the download URL.
 func (a *App) pollExportStatus(ctx context.Context, exportID string) (string, error) {
-	url := fmt.Sprintf("https://api.snyk.io/rest/groups/%s/exports/%s?version=2024-10-15", a.config.SnykGroupID, exportID)
+	url := fmt.Sprintf("%s/rest/groups/%s/exports/%s?version=2024-10-15", a.config.SnykApiBaseUrl, a.config.SnykGroupID, exportID)
 
 	type ExportStatusResponse struct {
 		Data struct {
@@ -272,36 +358,51 @@ func (a *App) pollExportStatus(ctx context.Context, exportID string) (string, er
 
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
-	pollingCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	pollingCtx, cancel := context.WithTimeout(ctx, 5*time.Minute) // Increased timeout for long exports
 	defer cancel()
 
+	a.logger.Info("Polling for export completion...", "exportID", exportID)
 	for {
 		select {
 		case <-pollingCtx.Done():
-			return "", errors.New("polling timed out after 2 minutes")
+			return "", errors.New("polling timed out after 5 minutes")
 		case <-ticker.C:
 			req, _ := http.NewRequestWithContext(pollingCtx, "GET", url, nil)
 			a.setAuthHeader(req)
 
 			resp, err := a.httpClient.Do(req)
 			if err != nil {
-				a.logger.Warn("Polling failed", "error", err.Error())
+				a.logger.Warn("Polling request failed", "error", err.Error())
 				continue
 			}
-			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				a.logger.Warn("Polling received non-200 status", "status", resp.Status)
+				resp.Body.Close()
+				continue
+			}
 
 			var statusResp ExportStatusResponse
-			if err := json.NewDecoder(resp.Body).Decode(&statusResp); err != nil {
+			bodyBytes, err := io.ReadAll(resp.Body)
+			if err != nil {
+				resp.Body.Close()
+				a.logger.Warn("Failed to read polling response body", "error", err)
+				continue
+			}
+			resp.Body.Close()
+
+			if err := json.Unmarshal(bodyBytes, &statusResp); err != nil {
 				a.logger.Warn("Invalid JSON in polling response", "error", err.Error())
 				continue
 			}
 
+			a.logger.Info("Polling status check", "status", statusResp.Data.Attributes.Status)
 			switch statusResp.Data.Attributes.Status {
 			case "FINISHED":
 				if len(statusResp.Data.Attributes.Results.Files) > 0 {
 					return statusResp.Data.Attributes.Results.Files[0].URL, nil
 				}
-				return "", errors.New("export finished but no file URL provided")
+				return "", errors.New("export finished but no file URL was provided")
 			case "ERROR":
 				return "", errors.New("export job failed with ERROR status")
 			}
@@ -309,7 +410,7 @@ func (a *App) pollExportStatus(ctx context.Context, exportID string) (string, er
 	}
 }
 
-// Downloads and aggregates the CSV export into dashboard data.
+// fetchAndProcessCSV downloads and aggregates the CSV export into dashboard data.
 func (a *App) fetchAndProcessCSV(ctx context.Context, fileURL string) (*DashboardData, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", fileURL, nil)
 	if err != nil {
@@ -333,11 +434,13 @@ func (a *App) fetchAndProcessCSV(ctx context.Context, fileURL string) (*Dashboar
 		colIndex[colName] = i
 	}
 
-	requiredCols := []string{"issue_severity", "computed_fixability", "project_environments", "project_name"}
-	for _, col := range requiredCols {
-		if _, ok := colIndex[col]; !ok {
-			return nil, fmt.Errorf("missing required column: %s", col)
-		}
+	severityCol, ok1 := colIndex["ISSUE_SEVERITY"]
+	fixabilityCol, ok2 := colIndex["COMPUTED_FIXABILITY"]
+	envsCol, ok3 := colIndex["PROJECT_ENVIRONMENTS"]
+	projectCol, ok4 := colIndex["PROJECT_NAME"]
+
+	if !ok1 || !ok2 || !ok3 || !ok4 {
+		return nil, fmt.Errorf("missing one or more required columns in CSV: ISSUE_SEVERITY, COMPUTED_FIXABILITY, PROJECT_ENVIRONMENTS, PROJECT_NAME")
 	}
 
 	issuesBySeverity := map[string]int{}
@@ -351,19 +454,22 @@ func (a *App) fetchAndProcessCSV(ctx context.Context, fileURL string) (*Dashboar
 			break
 		}
 		if err != nil || len(record) < len(header) {
+			a.logger.Warn("Skipping malformed CSV row", "error", err)
 			continue
 		}
 
-		severity := record[colIndex["issue_severity"]]
-		projectName := record[colIndex["project_name"]]
-		envs := record[colIndex["project_environments"]]
-		fixability := record[colIndex["computed_fixability"]]
+		severity := record[severityCol]
+		projectName := record[projectCol]
+		envs := record[envsCol]
+		fixability := record[fixabilityCol]
 
 		if severity != "" {
 			issuesBySeverity[severity]++
 		}
 		if envs != "" {
-			issuesByEnvironment[envs]++
+			for _, env := range splitAndClean(envs) {
+				issuesByEnvironment[env]++
+			}
 		} else {
 			issuesByEnvironment["undefined"]++
 		}
@@ -435,15 +541,13 @@ func parseDateParam(dateStr string) string {
 	if dateStr == "" {
 		return ""
 	}
-	// Try to parse as integer offset (number of days from now)
 	if days, err := strconv.Atoi(dateStr); err == nil {
 		return time.Now().UTC().AddDate(0, 0, days).Format("2006-01-02T00:00:00Z")
 	}
-	// Otherwise, assume it's already a formatted date string
 	return dateStr
 }
 
-// Sends a JSON response to the client.
+// respondWithJSON sends a JSON response to the client.
 func (a *App) respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	response, err := json.Marshal(payload)
 	if err != nil {
@@ -455,7 +559,7 @@ func (a *App) respondWithJSON(w http.ResponseWriter, code int, payload interface
 	_, _ = w.Write(response)
 }
 
-// Returns env var value or fallback.
+// getEnv returns env var value or fallback.
 func getEnv(key, fallback string) string {
 	if value, ok := os.LookupEnv(key); ok {
 		return value
