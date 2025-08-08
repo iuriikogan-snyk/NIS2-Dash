@@ -12,6 +12,9 @@ FROM nginx:1.27-alpine
 # Copy the built static files from the builder stage
 COPY --from=builder /app/build /usr/share/nginx/html
 
+# Copy the snyk_export.csv file to the Nginx server's HTML directory
+COPY frontend/public/snyk_export.csv /usr/share/nginx/html/snyk_export.csv
+
 # Remove the default Nginx configuration file
 RUN rm /etc/nginx/conf.d/default.conf
 

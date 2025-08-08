@@ -1,22 +1,65 @@
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
-  background-color: #f0f2f5;
-  color: #333;
+  background-color: #f5f7fa; /* Lighter grey for a cleaner look */
+  color: #030327; /* Snyk Black Rock */
   margin: 0;
 }
+
 .App-header {
-  background-color: #282c34;
+  background-color: #030327; /* Snyk Black Rock */
   padding: 20px;
   color: white;
   text-align: center;
+  border-bottom: 4px solid #0E00B9; /* Snyk Dark Blue */
 }
-.dashboard { padding: 20px; }
-.error { color: #d32f2f; text-align: center; }
-.kpi-row { display: flex; justify-content: center; margin-bottom: 2rem; }
-.card.kpi { background-color: #d32f2f; color: white; }
-.card.kpi h2 { color: white; }
-.card.kpi p { color: #eee; }
+
+.dashboard { 
+  padding: 20px; 
+}
+
+.error { 
+  color: #d32f2f; 
+  text-align: center; 
+}
+
+.kpi-row { 
+  display: flex; 
+  justify-content: center; 
+  gap: 20px; /* Add gap between KPI cards */
+  margin-bottom: 2rem; 
+}
+
+.card.kpi {
+  flex: 1; /* Allow cards to grow and fill space */
+  max-width: 300px; /* Set a max-width for better readability */
+}
+
+.card {
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+  padding: 20px;
+  text-align: center;
+}
+
+.card.kpi { 
+  background-color: #0E00B9; /* Snyk Dark Blue */
+  color: white; 
+}
+
+.card.kpi h2 { 
+  color: white; 
+  margin: 0;
+  font-size: 2.5rem;
+}
+
+.card.kpi p { 
+  color: #A3CCFA; /* Snyk Sail */
+  margin: 5px 0 0;
+  font-size: 1rem;
+}
+
 .chart-row {
   display: flex;
   justify-content: space-around;
@@ -24,6 +67,7 @@ body {
   flex-wrap: wrap;
   margin-bottom: 2rem;
 }
+
 .chart-container {
   background: white;
   padding: 20px;
@@ -32,20 +76,53 @@ body {
   width: 45%;
   min-width: 300px;
 }
-.chart-container h3 { text-align: center; margin-top: 0; }
-.pie { height: 300px; }
-.bar-chart { display: flex; flex-direction: column; gap: 10px; }
-.bar-item { display: flex; align-items: center; }
-.bar-label { width: 80px; text-transform: capitalize; font-size: 0.9em; }
+
+.chart-container h3 { 
+  text-align: center; 
+  margin-top: 0; 
+  color: #030327; /* Snyk Black Rock */
+}
+
+.pie {
+  height: 350px; /* Increased height to better fit title and chart */
+  display: flex;
+  flex-direction: column;
+}
+
+.pie svg {
+  flex-grow: 1;
+  min-height: 0;
+}
+
+.bar-chart { 
+  display: flex; 
+  flex-direction: column; 
+  gap: 10px; 
+}
+
+.bar-item { 
+  display: flex; 
+  align-items: center; 
+}
+
+.bar-label { 
+  width: 80px; 
+  text-transform: capitalize; 
+  font-size: 0.9em; 
+  color: #030327; /* Snyk Black Rock */
+}
+
 .bar {
-  background-color: #1976d2;
-  color: white;
+  background-color: #A3CCFA; /* Snyk Sail */
+  color: #030327; /* Snyk Black Rock */
   padding: 5px;
   border-radius: 4px;
   text-align: right;
   font-size: 0.9em;
   white-space: nowrap;
+  font-weight: bold;
 }
+
 .list-container {
   background: white;
   padding: 20px;
@@ -54,13 +131,43 @@ body {
   max-width: 80%;
   margin: 0 auto;
 }
-.list-container h3 { text-align: center; margin-top: 0; }
-.list-container ul { list-style: none; padding: 0; }
+
+.list-container h3 { 
+  text-align: center; 
+  margin-top: 0; 
+  color: #030327; /* Snyk Black Rock */
+}
+
+.list-container ul { 
+  list-style: none; 
+  padding: 0; 
+}
+
 .list-container li {
   display: flex;
   justify-content: space-between;
   padding: 10px;
   border-bottom: 1px solid #eee;
+  align-items: center;
 }
-.project-issues .critical-count { color: #d32f2f; margin-right: 15px; font-weight: bold; }
-.project-issues .high-count { color: #f57c00; font-weight: bold; }
+
+.project-issues .critical-count { 
+  color: #d32f2f; 
+  margin-right: 15px; 
+  font-weight: bold; 
+}
+
+.project-issues .high-count { 
+  color: #f57c00; 
+  font-weight: bold; 
+}
+
+/* Adding a bit more Snyk-like feel */
+a {
+  color: #0E00B9; /* Snyk Dark Blue */
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
