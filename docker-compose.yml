@@ -1,6 +1,5 @@
 # docker-compose.yml for local development and testing.
 services:
-  # Backend Go service
   backend:
     build:
       context: .

@@ -1,4 +1,3 @@
-snyk_export
 SCORE;CVE;CWE;FIRST_INTRODUCED;PROJECT_NAME;PROJECT_URL;PRODUCT_NAME;ORG_DISPLAY_NAME;ISSUE_SEVERITY;EXPLOIT_MATURITY;COMPUTED_FIXABILITY;ISSUE_URL;ISSUE_TYPE
 103;"[""CVE-2007-5686""]";"[""CWE-264""]";2024-10-25 17:14:34.017;iuriikogan-snyk/nodejs-goof:linux-arm64;https://app.snyk.io/org/cbir-techops/project/556f84a6-0075-41cf-a7a1-a76d87a99b9a;Snyk Container;CBIR - TechOps;Low;No Known Exploit;No Fix Supported;https://app.snyk.io/org/cbir-techops/project/556f84a6-0075-41cf-a7a1-a76d87a99b9a#issue-SNYK-DEBIAN12-SHADOW-1559391;Vulnerability
 125;"[""CVE-2019-9192""]";"[""CWE-674""]";2024-10-25 17:14:34.017;iuriikogan-snyk/nodejs-goof:linux-arm64;https://app.snyk.io/org/cbir-techops/project/556f84a6-0075-41cf-a7a1-a76d87a99b9a;Snyk Container;CBIR - TechOps;Low;No Known Exploit;No Fix Supported;https://app.snyk.io/org/cbir-techops/project/556f84a6-0075-41cf-a7a1-a76d87a99b9a#issue-SNYK-DEBIAN12-GLIBC-1547069;Vulnerability

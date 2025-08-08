@@ -26,7 +26,13 @@ body {
 .kpi-row { 
   display: flex; 
   justify-content: center; 
+  gap: 20px; /* Add gap between KPI cards */
   margin-bottom: 2rem; 
+}
+
+.card.kpi {
+  flex: 1; /* Allow cards to grow and fill space */
+  max-width: 300px; /* Set a max-width for better readability */
 }
 
 .card {
@@ -77,8 +83,15 @@ body {
   color: #030327; /* Snyk Black Rock */
 }
 
-.pie { 
-  height: 300px; 
+.pie {
+  height: 350px; /* Increased height to better fit title and chart */
+  display: flex;
+  flex-direction: column;
+}
+
+.pie svg {
+  flex-grow: 1;
+  min-height: 0;
 }
 
 .bar-chart { 
