@@ -1,6 +1,38 @@
 import React, { useState, useEffect } from 'react';
+import Papa from 'papaparse';
 import { PieChart } from 'react-minimal-pie-chart';
 import './App.css';
+
+// Helper function to process data from CSV or API
+const processData = (records) => {
+  const issuesBySeverity = {};
+  const issuesByEnvironment = {};
+  const issuesByProject = {};
+  let fixableCriticals = 0;
+
+  records.forEach(record => {
+    const severity = record.ISSUE_SEVERITY || record.severity;
+    const autofixable = record.COMPUTED_FIXABILITY || record.fixability;
+    const projectName = record.PROJECT_NAME || record.projectName;
+    const environments = record.PROJECT_ENVIRONMENTS || record.environments || 'N/A';
+
+    if (severity) issuesBySeverity[severity] = (issuesBySeverity[severity] || 0) + 1;
+    if (projectName) issuesByProject[projectName] = (issuesByProject[projectName] || 0) + 1;
+    
+    const envs = environments.split(',').map(e => e.trim()).filter(e => e);
+    if (envs.length > 0) {
+        envs.forEach(env => issuesByEnvironment[env] = (issuesByEnvironment[env] || 0) + 1);
+    } else {
+        issuesByEnvironment['N/A'] = (issuesByEnvironment['N/A'] || 0) + 1;
+    }
+
+    if (severity === 'critical' && autofixable === 'fixable') {
+      fixableCriticals++;
+    }
+  });
+
+  return { issuesBySeverity, issuesByEnvironment, issuesByProject, fixableCriticals };
+};
 
 const BarChart = ({ data, title }) => (
   <div className="chart-container">
@@ -43,121 +75,94 @@ const HighImpactVulnerabilities = ({ data }) => (
   </div>
 );
 
-const processData = (csv) => {
-
-  const lines = csv.trim().split('\n').filter(line => line.trim() !== '');
-  if (lines.length < 2) return {};
-  // Find the header line (should be the first line with 'ISSUE_SEVERITY' etc)
-  let headerLineIdx = 0;
-  while (headerLineIdx < lines.length && !lines[headerLineIdx].includes('ISSUE_SEVERITY')) {
-    headerLineIdx++;
-  }
-  if (headerLineIdx >= lines.length) return {};
-  const header = lines[headerLineIdx].split(';');
-  const records = lines.slice(headerLineIdx + 1).map(line => line.split(';'));
-
-  const issuesBySeverity = {};
-  const issuesByEnvironment = {};
-  let fixableCriticalIssues = 0;
-  const projectIssues = {};
-  const issuesByType = {};
-  const vulnerabilityAge = { "<30": 0, "30-60": 0, "61-90": 0, ">90": 0 };
-  const fixability = { Fixable: 0, "No Fix": 0, "Partially Fixable": 0 };
-
-  const severityIndex = header.indexOf('ISSUE_SEVERITY');
-  const fixabilityIndex = header.indexOf('COMPUTED_FIXABILITY');
-  const projectNameIndex = header.indexOf('PROJECT_NAME');
-  const issueTypeIndex = header.indexOf('ISSUE_TYPE');
-  const firstIntroducedIndex = header.indexOf('FIRST_INTRODUCED');
-  const exploitMaturityIndex = header.indexOf('EXPLOIT_MATURITY');
-
-  let highImpactVulnerabilities = 0;
-
-  records.forEach(record => {
-    // skip if record is not the right length
-    if (record.length < header.length) return;
-    const severity = record[severityIndex];
-    const fixabilityStatus = record[fixabilityIndex];
-    const projectName = record[projectNameIndex];
-    const issueType = record[issueTypeIndex];
-    const firstIntroduced = record[firstIntroducedIndex];
-    const exploitMaturity = record[exploitMaturityIndex];
-
-    if (severity) {
-      issuesBySeverity[severity] = (issuesBySeverity[severity] || 0) + 1;
-    }
-
-    if (projectName) {
-      if (!projectIssues[projectName]) {
-        projectIssues[projectName] = { name: projectName, criticalIssueCount: 0, highIssueCount: 0 };
-      }
-      if (severity === 'Critical') {
-        projectIssues[projectName].criticalIssueCount++;
-      }
-      if (severity === 'High') {
-        projectIssues[projectName].highIssueCount++;
-      }
-    }
-
-    if (severity === 'Critical' && fixabilityStatus === 'Fixable') {
-      fixableCriticalIssues++;
-    }
-
-    if ((severity === 'Critical' || severity === 'High') && exploitMaturity !== 'No Known Exploit') {
-      highImpactVulnerabilities++;
-    }
-
-    if (issueType) {
-      issuesByType[issueType] = (issuesByType[issueType] || 0) + 1;
-    }
-
-    if (firstIntroduced) {
-      const days = Math.floor((new Date() - new Date(firstIntroduced)) / (1000 * 60 * 60 * 24));
-      if (days < 30) vulnerabilityAge["<30"]++;
-      else if (days <= 60) vulnerabilityAge["30-60"]++;
-      else if (days <= 90) vulnerabilityAge["61-90"]++;
-      else vulnerabilityAge[">90"]++;
-    }
-
-    if (fixabilityStatus) {
-      if (fixabilityStatus === 'Fixable') fixability.Fixable++;
-      else if (fixabilityStatus === 'No Fix Supported') fixability["No Fix"]++;
-      else if (fixabilityStatus === 'Partially Fixable') fixability["Partially Fixable"]++;
-    }
-  });
-
-  const top5RiskiestProjects = Object.values(projectIssues)
-    .sort((a, b) => b.criticalIssueCount - a.criticalIssueCount || b.highIssueCount - a.highIssueCount)
-    .slice(0, 5);
-
-  return {
-    issuesBySeverity,
-    issuesByEnvironment: { Production: 10, Staging: 5, Development: 20 }, // Example data
-    fixableCriticalIssues,
-    top5RiskiestProjects,
-    issuesByType,
-    vulnerabilityAge,
-    fixability,
-    highImpactVulnerabilities,
-  };
-};
+const StatusBar = ({ status }) => (
+  <div className="status-bar">
+    <p>{status}</p>
+  </div>
+);
 
 function App() {
   const [data, setData] = useState(null);
+  const [status, setStatus] = useState('Loading initial data...');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    fetch('/snyk_export.csv')
-      .then(response => response.text())
-      .then(csvData => {
-        setData(processData(csvData));
-      });
+    // 1. Load static data first
+    Papa.parse('/snyk_export.csv', {
+      download: true,
+      header: true,
+      skipEmptyLines: true,
+      complete: (results) => {
+        const processed = processData(results.data);
+        setData(processed);
+        setStatus('Static data loaded. Fetching live data...');
+
+        // 2. Then fetch live data
+        fetch('/api/data')
+          .then(response => {
+            if (!response.ok) throw new Error('Failed to fetch live data');
+            return response.json();
+          })
+          .then(liveData => {
+            // The backend already processes the data, so we can use it directly
+            setData(liveData);
+            setStatus('Dashboard is up to date.');
+          })
+          .catch(error => {
+            console.error('Error fetching live data:', error);
+            setStatus('Failed to load live data. Displaying static data.');
+          });
+      },
+      error: (err) => {
+        console.error('Failed to load static CSV:', err);
+        setStatus('Error loading initial data. Trying to fetch live data...');
+        // Attempt to fetch live data even if static fails
+        fetch('/api/data')
+          .then(response => response.json())
+          .then(liveData => {
+            setData(liveData);
+            setStatus('Dashboard is up to date.');
+          })
+          .catch(fetchErr => setStatus('Failed to load any data.'));
+      },
+    });
   }, []);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const response = await fetch('/api/data');
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Network response was not ok: ${errorText}`);
+        }
+        const result = await response.json();
+        setData(result);
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
+
+  if (loading) {
+    return <div className="App"><p>Loading and processing Snyk data...</p></div>;
+  }
+
+  if (error) {
+    return <div className="App"><p className="error">Error: {error}</p></div>;
+  }
 
   return (
     <div className="App">
       <header className="App-header">
         <h1>Snyk Export API Dash</h1>
       </header>
+      <StatusBar status={status} />
       <main className="dashboard">
         {data ? (
           <>
@@ -191,7 +196,7 @@ function App() {
             </div>
           </>
         ) : (
-          <p>Loading and processing Snyk data...</p>
+          <p>Loading dashboard...</p>
         )}
       </main>
     </div>
@@ -199,4 +204,3 @@ function App() {
 }
 
 export default App;
-
