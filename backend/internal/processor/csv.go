@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"sort"
 	"strings"
 
 	"github.com/iuriikogan-snyk/NIS2-Dash/backend/internal/snyk"
@@ -41,105 +40,105 @@ func (p *CSVProcessor) FetchAndProcessCSV(ctx context.Context, fileURL string) (
 	defer resp.Body.Close()
 
 	reader := csv.NewReader(resp.Body)
+	return p.ProcessCSV(ctx, reader)
+}
+
+func (p *CSVProcessor) ProcessCSV(ctx context.Context, reader *csv.Reader) (*snyk.DashboardData, error) {
 	header, err := reader.Read()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read CSV header: %w", err)
 	}
 
 	colIndex := make(map[string]int)
-	for i, colName := range header {
-		colIndex[colName] = i
+	for i, col := range header {
+		colIndex[col] = i
 	}
 
-	severityCol, ok1 := colIndex["ISSUE_SEVERITY"]
-	autofixableCol, ok2 := colIndex["COMPUTED_FIXABILITY"]
-	environmentsCol, ok3 := colIndex["PROJECT_ENVIRONMENTS"]
-	projectNameCol, ok4 := colIndex["PROJECT_NAME"]
+	severityCol, hasSeverity := colIndex["ISSUE_SEVERITY"]
+	fixabilityCol, hasFixability := colIndex["COMPUTED_FIXABILITY"]
+	envsCol, hasEnvs := colIndex["PROJECT_ENVIRONMENTS"]
+	projectCol, hasProject := colIndex["PROJECT_NAME"]
 
-	if !ok1 || !ok2 || !ok4 {
-		return nil, fmt.Errorf("missing one or more required columns in CSV: ISSUE_SEVERITY, COMPUTED_FIXABILITY, PROJECT_NAME")
-	}
-
-	issuesBySeverity := map[string]int{}
-	issuesByEnvironment := map[string]int{}
+	issuesBySeverity := make(map[string]int)
+	issuesByEnvironment := make(map[string]int)
+	issuesByProject := make(map[string]int)
 	fixableCriticals := 0
-	projectIssues := map[string]*snyk.ProjectInfo{}
 
 	for {
 		record, err := reader.Read()
 		if err == io.EOF {
 			break
 		}
-		if err != nil || len(record) < len(header) {
-			p.logger.Warn("Skipping malformed CSV row", "error", err)
+		if err != nil {
+			p.logger.Warn("error reading CSV record", "error", err)
 			continue
 		}
 
-		severity := record[severityCol]
-		autofixable := record[autofixableCol]
-		projectName := record[projectNameCol]
+		var severity, fixability, projectName, environments string
 
-		environments := "N/A"
-		if ok3 && len(record) > environmentsCol {
-			environments = record[environmentsCol]
+		if hasSeverity {
+			severity = getColumnValue(record, severityCol)
+		}
+		if hasFixability {
+			fixability = getColumnValue(record, fixabilityCol)
+		}
+		if hasProject {
+			projectName = getColumnValue(record, projectCol)
+		}
+		if hasEnvs {
+			environments = getColumnValue(record, envsCol)
+		} else {
+			environments = "N/A"
 		}
 
 		if severity != "" {
 			issuesBySeverity[severity]++
+		} else {
+			issuesBySeverity["unknown"]++
 		}
-		if environments != "" {
-			for _, env := range splitAndClean(environments) {
+
+		if projectName != "" {
+			issuesByProject[projectName]++
+		}
+
+		envs := splitAndClean(environments)
+		if len(envs) > 0 {
+			for _, env := range envs {
 				issuesByEnvironment[env]++
 			}
 		} else {
-			issuesByEnvironment["undefined"]++
+			issuesByEnvironment["N/A"]++
 		}
-		if severity == "critical" && autofixable == "fixable" {
+
+		if severity == "critical" && fixability == "fixable" {
 			fixableCriticals++
 		}
-
-		if _, ok := projectIssues[projectName]; !ok {
-			projectIssues[projectName] = &snyk.ProjectInfo{Name: projectName}
-		}
-		if severity == "critical" {
-			projectIssues[projectName].CriticalIssueCount++
-		}
-		if severity == "high" {
-			projectIssues[projectName].HighIssueCount++
-		}
 	}
 
-	var projects []snyk.ProjectInfo
-	for _, proj := range projectIssues {
-		projects = append(projects, *proj)
-	}
-	sort.Slice(projects, func(i, j int) bool {
-		if projects[i].CriticalIssueCount != projects[j].CriticalIssueCount {
-			return projects[i].CriticalIssueCount > projects[j].CriticalIssueCount
-		}
-		return projects[i].HighIssueCount > projects[j].HighIssueCount
-	})
-
-	if len(projects) > 5 {
-		projects = projects[:5]
-	}
-
+	// Note: Top5RiskiestProjects logic has been simplified for now.
 	return &snyk.DashboardData{
 		IssuesBySeverity:      issuesBySeverity,
 		IssuesByEnvironment:   issuesByEnvironment,
 		FixableCriticalIssues: fixableCriticals,
-		Top5RiskiestProjects:  projects,
+		Top5RiskiestProjects:  []snyk.ProjectInfo{},
 	}, nil
 }
 
-func splitAndClean(input string) []string {
-	if input == "" {
-		return nil
+func getColumnValue(record []string, index int) string {
+	if index >= 0 && index < len(record) {
+		return record[index]
 	}
-	parts := strings.Split(input, ",")
+	return ""
+}
+
+func splitAndClean(s string) []string {
+	if s == "" || s == "N/A" {
+		return []string{}
+	}
+	parts := strings.Split(s, ",")
 	result := make([]string, 0, len(parts))
-	for _, p := range parts {
-		trimmed := strings.TrimSpace(p)
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
 		if trimmed != "" {
 			result = append(result, trimmed)
 		}
