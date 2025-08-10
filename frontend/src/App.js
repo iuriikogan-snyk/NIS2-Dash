@@ -1,6 +1,38 @@
 import React, { useState, useEffect } from 'react';
+import Papa from 'papaparse';
 import { PieChart } from 'react-minimal-pie-chart';
 import './App.css';
+
+// Helper function to process data from CSV or API
+const processData = (records) => {
+  const issuesBySeverity = {};
+  const issuesByEnvironment = {};
+  const issuesByProject = {};
+  let fixableCriticals = 0;
+
+  records.forEach(record => {
+    const severity = record.ISSUE_SEVERITY || record.severity;
+    const autofixable = record.COMPUTED_FIXABILITY || record.fixability;
+    const projectName = record.PROJECT_NAME || record.projectName;
+    const environments = record.PROJECT_ENVIRONMENTS || record.environments || 'N/A';
+
+    if (severity) issuesBySeverity[severity] = (issuesBySeverity[severity] || 0) + 1;
+    if (projectName) issuesByProject[projectName] = (issuesByProject[projectName] || 0) + 1;
+    
+    const envs = environments.split(',').map(e => e.trim()).filter(e => e);
+    if (envs.length > 0) {
+        envs.forEach(env => issuesByEnvironment[env] = (issuesByEnvironment[env] || 0) + 1);
+    } else {
+        issuesByEnvironment['N/A'] = (issuesByEnvironment['N/A'] || 0) + 1;
+    }
+
+    if (severity === 'critical' && autofixable === 'fixable') {
+      fixableCriticals++;
+    }
+  });
+
+  return { issuesBySeverity, issuesByEnvironment, issuesByProject, fixableCriticals };
+};
 
 const BarChart = ({ data, title }) => (
   <div className="chart-container">
@@ -43,10 +75,59 @@ const HighImpactVulnerabilities = ({ data }) => (
   </div>
 );
 
+const StatusBar = ({ status }) => (
+  <div className="status-bar">
+    <p>{status}</p>
+  </div>
+);
+
 function App() {
   const [data, setData] = useState(null);
+  const [status, setStatus] = useState('Loading initial data...');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  useEffect(() => {
+    // 1. Load static data first
+    Papa.parse('/snyk_export.csv', {
+      download: true,
+      header: true,
+      skipEmptyLines: true,
+      complete: (results) => {
+        const processed = processData(results.data);
+        setData(processed);
+        setStatus('Static data loaded. Fetching live data...');
+
+        // 2. Then fetch live data
+        fetch('/api/data')
+          .then(response => {
+            if (!response.ok) throw new Error('Failed to fetch live data');
+            return response.json();
+          })
+          .then(liveData => {
+            // The backend already processes the data, so we can use it directly
+            setData(liveData);
+            setStatus('Dashboard is up to date.');
+          })
+          .catch(error => {
+            console.error('Error fetching live data:', error);
+            setStatus('Failed to load live data. Displaying static data.');
+          });
+      },
+      error: (err) => {
+        console.error('Failed to load static CSV:', err);
+        setStatus('Error loading initial data. Trying to fetch live data...');
+        // Attempt to fetch live data even if static fails
+        fetch('/api/data')
+          .then(response => response.json())
+          .then(liveData => {
+            setData(liveData);
+            setStatus('Dashboard is up to date.');
+          })
+          .catch(fetchErr => setStatus('Failed to load any data.'));
+      },
+    });
+  }, []);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -81,6 +162,7 @@ function App() {
       <header className="App-header">
         <h1>Snyk Export API Dash</h1>
       </header>
+      <StatusBar status={status} />
       <main className="dashboard">
         {data ? (
           <>
@@ -114,7 +196,7 @@ function App() {
             </div>
           </>
         ) : (
-          <p>No data available.</p>
+          <p>Loading dashboard...</p>
         )}
       </main>
     </div>

@@ -1,24 +1,24 @@
 # Stage 1: Build the React application
-FROM node:21 AS build
+FROM node:21-alpine AS build
 
 WORKDIR /app
 
-# Copy package.json and package-lock.json
-COPY package*.json ./
+# Copy package.json and package-lock.json first to leverage Docker cache
+COPY package.json package-lock.json* ./
 
 # Install dependencies
 RUN npm install
 
-# Copy the rest of the application's source code
+# Copy the rest of the application source code
 COPY . .
 
 # Build the application
 RUN npm run build
 
-# Stage 2: Serve the application with Nginx
-FROM nginx:1.27-alpine
+# Stage 2: Serve the application from a lightweight server
+FROM nginx:1.21-alpine
 
-# Copy the built assets from the build stage
+# Copy the build output from the build stage
 COPY --from=build /app/build /usr/share/nginx/html
 
 # Copy the nginx config
