@@ -52,12 +52,12 @@ func (p *CSVProcessor) FetchAndProcessCSV(ctx context.Context, fileURL string) (
 	}
 
 	severityCol, ok1 := colIndex["ISSUE_SEVERITY"]
-	fixabilityCol, ok2 := colIndex["AUTOFIXABLE"]
-	envsCol, ok3 := colIndex["PROJECT_ENVIRONMENTS"]
-	projectCol, ok4 := colIndex["PROJECT_NAME"]
+	autofixableCol, ok2 := colIndex["COMPUTED_FIXABILITY"]
+	environmentsCol, ok3 := colIndex["PROJECT_ENVIRONMENTS"]
+	projectNameCol, ok4 := colIndex["PROJECT_NAME"]
 
-	if !ok1 || !ok2 || !ok3 || !ok4 {
-		return nil, fmt.Errorf("missing one or more required columns in CSV: ISSUE_SEVERITY, AUTOFIXABLE, PROJECT_ENVIRONMENTS, PROJECT_NAME")
+	if !ok1 || !ok2 || !ok4 {
+		return nil, fmt.Errorf("missing one or more required columns in CSV: ISSUE_SEVERITY, COMPUTED_FIXABILITY, PROJECT_NAME")
 	}
 
 	issuesBySeverity := map[string]int{}
@@ -76,21 +76,25 @@ func (p *CSVProcessor) FetchAndProcessCSV(ctx context.Context, fileURL string) (
 		}
 
 		severity := record[severityCol]
-		projectName := record[projectCol]
-		envs := record[envsCol]
-		fixability := record[fixabilityCol]
+		autofixable := record[autofixableCol]
+		projectName := record[projectNameCol]
+
+		environments := "N/A"
+		if ok3 && len(record) > environmentsCol {
+			environments = record[environmentsCol]
+		}
 
 		if severity != "" {
 			issuesBySeverity[severity]++
 		}
-		if envs != "" {
-			for _, env := range splitAndClean(envs) {
+		if environments != "" {
+			for _, env := range splitAndClean(environments) {
 				issuesByEnvironment[env]++
 			}
 		} else {
 			issuesByEnvironment["undefined"]++
 		}
-		if severity == "critical" && fixability == "fixable" {
+		if severity == "critical" && autofixable == "fixable" {
 			fixableCriticals++
 		}
 
