@@ -67,7 +67,6 @@ A demonstration application showcasing Snyk's Analytics Export API capabilities 
 Perfect for demonstrating to clients how Snyk's Analytics Export API can:
 
 - Integrate with existing compliance workflows
-- Provide real-time security insights
 - Scale across multiple organizations
 - Support regulatory requirements like NIS2
 
