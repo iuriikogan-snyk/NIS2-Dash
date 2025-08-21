@@ -10,7 +10,6 @@ A demonstration application showcasing Snyk's Analytics Export API capabilities 
 
 - **Backend**: Go-based API server that interfaces with Snyk's Analytics Export API
 - **Frontend**: React-based dashboard for visualizing security metrics and compliance data
-- **Integration**: Real-time data processing from Snyk CSV exports with customizable filtering
 
 ## Key Features
 
@@ -68,7 +67,6 @@ A demonstration application showcasing Snyk's Analytics Export API capabilities 
 Perfect for demonstrating to clients how Snyk's Analytics Export API can:
 
 - Integrate with existing compliance workflows
-- Provide real-time security insights
 - Scale across multiple organizations
 - Support regulatory requirements like NIS2
 
